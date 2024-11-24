@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models # type: ignore
 
 class Voters(models.Model):
     uuid = models.CharField(max_length = 20, primary_key=True)

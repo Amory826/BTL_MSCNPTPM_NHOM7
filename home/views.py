@@ -1,15 +1,16 @@
-from django.shortcuts import render, redirect
-from django.http import HttpResponse, JsonResponse
-from django.template import loader
-from django.forms.models import model_to_dict
-from django.contrib import messages
-from django.conf import settings
-from django.utils import timezone
+import re
+from django.shortcuts import render, redirect # type: ignore # type: ignore
+from django.http import HttpResponse, JsonResponse # type: ignore
+from django.template import loader # type: ignore
+from django.forms.models import model_to_dict # type: ignore
+from django.contrib import messages # type: ignore
+from django.conf import settings # type: ignore
+from django.utils import timezone # type: ignore
 
 from .models import Voters, PoliticalParty, Vote, VoteBackup, Block, MiningInfo
 from .methods_module import send_email_otp, generate_keys, verify_vote, send_email_private_key, vote_count
 
-from Crypto.Hash import SHA3_256
+from Crypto.Hash import SHA3_256 # type: ignore
 from .merkle_tool import MerkleTools
 import datetime, json, time, random, string
 
@@ -22,32 +23,84 @@ def home(request):
     return render(request, 'home.html')
 
 # --------------- Authentication -------------------
-def authentication(request):
+from home.models import Voters
+from django.http import JsonResponse
+from datetime import datetime
 
-    aadhar_no = request.GET.get('aadhar_no')
+def authentication(request):
+    # Kiểm tra nếu phương thức yêu cầu là POST hoặc GET
+    if request.method == "POST":
+        aadhar_no = request.POST.get('aadhar_no')  # Lấy Aadhar từ POST
+    else:
+        aadhar_no = request.GET.get('aadhar_no')  # Lấy Aadhar từ GET
 
     details = {'success': False}
-    
+
+    # Kiểm tra nếu aadhar_no được cung cấp
+    if not aadhar_no:
+        details['error'] = 'Aadhar number is required!'
+        return JsonResponse(details)
+
     try:
-        voter = Voters.objects.get(uuid = aadhar_no)
+        # Tìm kiếm hoặc tạo mới voter
+        voter, created = Voters.objects.get_or_create(
+            uuid=aadhar_no,
+            defaults={
+                'name' : 'Tester',
+                'vote_done': 0,
+                'dob': datetime.now(),
+            }
+        )
+
+        # Phản hồi trạng thái
+        if created:
+            details['message'] = 'Aadhar number successfully registered!'
+        else:
+            details['message'] = 'Aadhar number already exists.'
+
         request.session['uuid'] = aadhar_no
+
+        # Render thông tin chi tiết người dùng vào HTML template
         render_html = loader.render_to_string('candidate_details.html', {'details': voter})
+
         if voter.vote_done:
             details = {
                 'error': 'You have already casted your vote.'
             }
         else:
-            details = {
+            details.update({
                 'success': True,
                 'html': render_html,
                 'details': model_to_dict(voter)
-            }
-    except:
-        details = {
-            'error': 'Invalid Aadhar, Please Enter Correct Aadhar Number!'
-        }
+            })
+
+    except Exception as e:
+        details['error'] = f"An error occurred: {str(e)}"
 
     return JsonResponse(details)
+
+# --------------- Authentication -------------------
+# def authentication(request):
+#     # Bỏ qua bước nhập và xác thực Aadhar
+#     # Giả sử luôn thành công
+#     voter = {
+#         'uuid': '1',  # UUID giả
+#         'name': 'Test Voter',  # Tên giả
+#         'vote_done': False,  # Luôn cho phép bỏ phiếu
+#     }
+
+#     request.session['uuid'] = voter['uuid']  # Lưu UUID giả vào session
+#     render_html = loader.render_to_string('candidate_details.html', {'details': voter})
+
+#     details = {
+#         'success': True,
+#         'html': render_html,
+#         'details': voter,
+#     }
+
+#     return JsonResponse(details)
+
+
 
 # --------- Send otp for email verfication -----------
 def send_otp(request):
@@ -107,36 +160,50 @@ def get_parties(request):
 
 # ------------- Save vote in database ------------------------
 def create_vote(request):
+    try:
+        uuid = request.session.get('uuid')
+        private_key = request.GET.get('private-key')
+        public_key = request.session.get('public-key')
+        selected_party_id = request.GET.get('selected-party-id')
+        curr = timezone.now()
 
-    uuid = request.session['uuid']
+        if not (uuid and private_key and public_key and selected_party_id):
+            return JsonResponse({'error': 'Missing required data for vote creation.'})
 
-    private_key = request.GET.get('private-key')
-    public_key = request.session['public-key']
+        ballot = f'{uuid}|{selected_party_id}|{curr.timestamp()}'
+        print(f"Ballot: {ballot}")
 
-    selected_party_id = request.GET.get('selected-party-id')
+        status = verify_vote(private_key, public_key, ballot)
+        print(f"Verify vote status: {status}")
 
-    curr = timezone.now()
+        # Kiểm tra giá trị trả về của verify_vote
+        if not status or len(status) < 4:
+            return JsonResponse({'error': 'Invalid response from verify_vote.'})
 
-    ballot = f'{uuid}|{selected_party_id}|{curr.timestamp()}'
-    
-    status = verify_vote(private_key, public_key, ballot)
-    context = {'success': status[0], 'status': status[1]}
+        context = {'success': status[0], 'status': status[1] or 'Invalid status'}
 
-    if status[0]:
-        try:
-            Vote(uuid = uuid, vote_party_id = selected_party_id, timestamp = curr).save()
-            VoteBackup(uuid = uuid, vote_party_id = selected_party_id, timestamp = curr).save()
-            voter = Voters.objects.get(uuid = request.session['uuid'])
-            voter.vote_done = True
-            voter.save()
-        except Exception as e:
-            context['status'] = 'We are not able to save your vote. Please try again. '+str(e)+'.'
-            
-    html = loader.render_to_string('final-status.html', {
-        'ballot': status[2], 'ballot_signature': status[3], 'status': status[1]})
-    context['html'] = html
+        if status[0]:
+            try:
+                Vote(uuid=uuid, vote_party_id=selected_party_id, timestamp=curr).save()
+                VoteBackup(uuid=uuid, vote_party_id=selected_party_id, timestamp=curr).save()
+                voter = Voters.objects.get(uuid=uuid)
+                voter.vote_done = True
+                voter.save()
+            except Exception as e:
+                context['status'] = f'Error saving your vote: {str(e)}'
 
-    return JsonResponse(context)
+        html = loader.render_to_string('final-status.html', {
+            'ballot': status[2],
+            'ballot_signature': status[3],
+            'status': context['status']
+        })
+        context['html'] = html
+
+        return JsonResponse(context)
+
+    except Exception as e:
+        return JsonResponse({'error': f'An unexpected error occurred: {str(e)}'})
+
 
 # -------------- create Dummy Data ------------------
 def create_dummy_data(request):

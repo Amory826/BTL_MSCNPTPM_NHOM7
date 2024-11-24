@@ -121,7 +121,7 @@ USE_TZ = True
 STATIC_URL = '/static/'
 
 EMAIL_ADDRESS = 'tuan8826938826@gmail.com'
-EMAIL_PASSWORD = 'Tuan@123456'
+EMAIL_PASSWORD = 'umci obfy zthi nbuq'
 TRANSACTIONS_PER_BLOCK = 1
 
 # PUZZLE
