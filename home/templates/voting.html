@@ -26,8 +26,8 @@
         <div class="vote-confirmation">
             <div class="confirm">Confirm ?</div>
             <img class="confirmation-party-logo">
-            <div class="confirmation-party-name">Congress</div>
-            <textarea id="private-key-input" style="margin-top: 20px;" placeholder="Input private key sent to you at your email-id" rows="5"></textarea>
+            <div class="confirmation-party-name">Party Name</div>
+            <!-- Removed private key input -->
             <div class="vote-confirmation-buttons">
                 <a id="final-confirm">Yes, Vote</a>
                 <a id="cancel-confirm">No, Cancel</a>
@@ -43,11 +43,53 @@
                 <div class="final-message">
                 </div>
         </div>
-        <img class="loading-img" style="margin-top: 50px;" src= "{% static 'images/loading.gif' %}">
-        <div>Please wait... we are processing your priceless vote !</div>
+        <img class="loading-img" style="margin-top: 50px;" src="{% static 'images/loading.gif' %}">
+        <div>Please wait... we are processing your priceless vote!</div>
     </div>
 </div>
 
 <script>
-    $.getScript( "{% static 'scripts/voting.js' %}" );
+    $(document).ready(function () {
+        // Highlight selected party and show confirmation dialog
+        $('.party-list .option').on('click', function () {
+            const partyId = $(this).attr('id');
+            const partyLogo = $(this).find('img').attr('src');
+            const partyName = $(this).find('.party-name').text();
+
+            $('.confirmation-party-logo').attr('src', partyLogo);
+            $('.confirmation-party-name').text(partyName);
+
+            $('.dialog').fadeIn();
+
+            $('#final-confirm').off('click').on('click', function () {
+                castVote(partyId);
+                $('.dialog').fadeOut();
+                $('.all-done').fadeIn();
+            });
+
+            $('#cancel-confirm').off('click').on('click', function () {
+                $('.dialog').fadeOut();
+            });
+        });
+
+        // AJAX call to create vote
+        function castVote(partyId) {
+            $.ajax({
+                url: '/create-vote/',
+                method: 'GET',
+                data: { 'selected-party-id': partyId },
+                success: function (response) {
+                    if (response.success) {
+                        $('.final-message').text("Your vote has been successfully cast!");
+                        $('.voted-party-image').attr('src', $('.confirmation-party-logo').attr('src'));
+                    } else {
+                        $('.final-message').text("Error: " + (response.status || "An error occurred while casting your vote."));
+                    }
+                },
+                error: function () {
+                    $('.final-message').text("An error occurred while processing your vote.");
+                }
+            });
+        }
+    });
 </script>
